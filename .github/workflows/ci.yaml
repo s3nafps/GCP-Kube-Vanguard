@@ -1,0 +1,157 @@
+# ==============================================================================
+# CI/CD Pipeline — Build, Push to GAR & Terraform Validation
+# ==============================================================================
+# This workflow authenticates to GCP using Workload Identity Federation (WIF)
+# instead of long-lived JSON key files. It:
+#   1. Builds a Docker image from the repository root.
+#   2. Pushes the image to Google Artifact Registry (GAR).
+#   3. Runs Terraform format, init, validate, and plan checks.
+#
+# PREREQUISITES:
+#   - Configure a Workload Identity Pool + Provider in your GCP project.
+#   - Create a Service Account with `roles/artifactregistry.writer`.
+#   - Bind the GitHub OIDC identity to the SA via an attribute condition.
+#   - Set the following GitHub repository secrets:
+#       GCP_PROJECT_ID          — Your GCP project ID
+#       WIF_PROVIDER            — projects/<NUM>/locations/global/workloadIdentityPools/<POOL>/providers/<PROVIDER>
+#       WIF_SERVICE_ACCOUNT     — <SA_NAME>@<PROJECT_ID>.iam.gserviceaccount.com
+#       GAR_REGION              — e.g., europe-west1
+#       GAR_REPOSITORY          — e.g., vanguard-docker
+# ==============================================================================
+
+name: CI — Build, Push & Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  IMAGE_NAME: vanguard-app
+  GAR_REGISTRY: ${{ secrets.GAR_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.GAR_REPOSITORY }}
+
+permissions:
+  contents: read
+  id-token: write # Required for OIDC token request (Workload Identity Federation)
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 1: Build & Push Docker Image to Artifact Registry
+  # ────────────────────────────────────────────────────────────────────────────
+  build-and-push:
+    name: "🐳 Build & Push Image"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP via Workload Identity Federation
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Login to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_REGION }}-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GAR_REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 2: Terraform Validation & Plan
+  # ────────────────────────────────────────────────────────────────────────────
+  terraform:
+    name: "🏗️ Terraform Validate & Plan"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.9"
+
+      - name: Authenticate to GCP via Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan (on PRs)
+        if: github.event_name == 'pull_request'
+        id: plan
+        run: terraform plan -no-color -input=false
+        continue-on-error: true
+
+      - name: Post Plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `### 🏗️ Terraform Validation Results
+
+            | Check | Status |
+            |-------|--------|
+            | 📐 Format | \`${{ steps.fmt.outcome }}\` |
+            | ⚙️ Init | \`${{ steps.init.outcome }}\` |
+            | ✅ Validate | \`${{ steps.validate.outcome }}\` |
+            | 📋 Plan | \`${{ steps.plan.outcome }}\` |
+
+            <details><summary>Show Plan Output</summary>
+
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+
+            </details>
+
+            *Triggered by @${{ github.actor }} via \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });

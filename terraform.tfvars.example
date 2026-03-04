@@ -1,0 +1,48 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# EXAMPLE VARIABLE VALUES — Copy to terraform.tfvars and customise
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# cp terraform.tfvars.example terraform.tfvars
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+project_id  = "my-gcp-project-id"
+region      = "europe-west1"
+zone        = "europe-west1-b"
+environment = "dev"
+
+# ── Networking ────────────────────────────────────────────────────────────────
+subnet_cidr   = "10.0.0.0/20"
+pods_cidr     = "10.16.0.0/14"
+services_cidr = "10.20.0.0/20"
+master_cidr   = "172.16.0.0/28"
+
+# ── Cluster ───────────────────────────────────────────────────────────────────
+cluster_name    = "vanguard-cluster"
+release_channel = "REGULAR"
+
+authorized_networks = [
+  {
+    display_name = "iap-bastion"
+    cidr_block   = "35.235.240.0/20"
+  },
+  # Add your office / VPN CIDR here:
+  # {
+  #   display_name = "office-vpn"
+  #   cidr_block   = "203.0.113.0/24"
+  # },
+]
+
+# ── Node Pool ─────────────────────────────────────────────────────────────────
+machine_type   = "e2-standard-2"
+disk_size_gb   = 50
+min_node_count = 1
+max_node_count = 3
+
+# ── IAM / Workload Identity ──────────────────────────────────────────────────
+workload_identity_namespace = "default"
+workload_identity_ksa_name  = "workload-ksa"
+workload_gsa_roles = [
+  "roles/storage.objectViewer",
+]
+
+# ── Artifact Registry ────────────────────────────────────────────────────────
+gar_repository_id = "vanguard-docker"
