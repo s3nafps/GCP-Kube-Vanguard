@@ -37,12 +37,34 @@ permissions:
 
 jobs:
   # ────────────────────────────────────────────────────────────────────────────
-  # Job 1: Build & Push Docker Image to Artifact Registry
+  # Job 1: Check Required Secrets
+  # ────────────────────────────────────────────────────────────────────────────
+  # Runs first to determine if the repository has the necessary WIF secrets.
+  # If not, subsequent GCP-dependent jobs will be skipped cleanly.
+  setup:
+    name: " Check Configuration"
+    runs-on: ubuntu-latest
+    outputs:
+      has_wif: ${{ steps.check_secrets.outputs.has_wif }}
+    steps:
+      - name: Check WIF Secret
+        id: check_secrets
+        run: |
+          if [ "${{ secrets.WIF_PROVIDER }}" != "" ]; then
+            echo "has_wif=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_wif=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ WIF_PROVIDER secret not found. Skipping GCP GCP deployments."
+          fi
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 2: Build & Push Docker Image to Artifact Registry
   # ────────────────────────────────────────────────────────────────────────────
   build-and-push:
-    name: "🐳 Build & Push Image"
+    name: " Build & Push Image"
+    needs: setup
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.has_wif == 'true'
 
     steps:
       - name: Checkout repository
@@ -84,11 +106,13 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ────────────────────────────────────────────────────────────────────────────
-  # Job 2: Terraform Validation & Plan
+  # Job 3: Terraform Validation & Plan
   # ────────────────────────────────────────────────────────────────────────────
   terraform:
-    name: "🏗️ Terraform Validate & Plan"
+    name: " Terraform Validate & Plan"
+    needs: setup
     runs-on: ubuntu-latest
+    if: needs.setup.outputs.has_wif == 'true'
 
     steps:
       - name: Checkout repository
