@@ -1,8 +1,8 @@
-#  GCP-Kube-Vanguard
+# GCP-Kube-Vanguard
 
-**Enterprise-Grade Private GKE Deployment on Google Cloud Platform**
+Private GKE deployment on Google Cloud Platform
 
-A production-hardened, modular Terraform codebase that deploys a fully private Google Kubernetes Engine cluster with defense-in-depth security, least-privilege IAM, Workload Identity, and CI/CD via GitHub Actions.
+Modular Terraform for a private Google Kubernetes Engine cluster with least-privilege IAM, Workload Identity, and CI/CD via GitHub Actions.
 
 ---
 
